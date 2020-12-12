@@ -29,6 +29,7 @@
  */
 
 #ifndef DEBUGGING
+#error DEBUGGING not defined
 #define DEBUGGING 1	/* 1 or 0 -- do you want debugging code built in? */
 #endif
 
@@ -42,11 +43,16 @@
 			 */
 
 #define MAILCMD _PATH_SENDMAIL					/*-*/
-#define MAILARGS "%s -FCronDaemon -odi -oem -or0s %s"		/*-*/
+#define MAILARGS "%s -FCronDaemon -i -B8BITMIME -oem  %s"	/*-*/
 			/* -Fx	 = set full-name of sender
+			 * -i    = don't terminate on "." by itself
+			 * -B8BITMIME = 8-bit processing
 			 * -odi	 = Option Deliverymode Interactive
 			 * -oem	 = Option Errors Mailedtosender
+ 			 * -t    = read recipient from header of message
 			 * -or0s = Option Readtimeout -- don't time out
+			 * XXX: sendmail doesn't allow -or0s when invoked
+			 * by joe user.  --okir
 			 */
 
 /* #define MAILCMD "/bin/mail"			/*-*/

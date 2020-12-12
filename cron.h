@@ -40,6 +40,20 @@
 #include "config.h"
 #include "externs.h"
 
+#if SYS_TIME_H
+# include <sys/time.h>
+#else
+# include <time.h>
+#endif
+
+
+#ifdef WITH_SELINUX
+#include <selinux/selinux.h>
+#endif
+
+#define SYSUSERNAME "root"
+
+
 	/* these are really immutable, and are
 	 *   defined for symbolic convenience only
 	 * TRUE, FALSE, and ERR must be distinct
@@ -66,8 +80,9 @@
 #define	OK_EXIT		0	/* exit() with this is considered 'normal' */
 #define	MAX_FNAME	100	/* max length of internally generated fn */
 #define	MAX_COMMAND	1000	/* max length of internally generated cmd */
-#define	MAX_ENVSTR	1000	/* max length of envvar=value\0 strings */
-#define	MAX_TEMPSTR	100	/* obvious */
+#define	MAX_TEMPSTR	1000	/* max length of envvar=value\0 strings */
+#define	MAX_ENVSTR	MAX_TEMPSTR	/* DO NOT change - buffer overruns otherwise */
+#define MAX_TAB_LINES	10000	/* max length of crontabs */
 #define	MAX_UNAME	20	/* max length of username, should be overkill */
 #define	ROOT_UID	0	/* don't change this, it really must be root */
 #define	ROOT_USER	"root"	/* ditto */
@@ -87,6 +102,7 @@
 #define	CRON_TAB(u)	"%s/%s", SPOOL_DIR, u
 #define	REG		register
 #define	PPC_NULL	((char **)NULL)
+#define NHEADER_LINES   3
 
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN 64
@@ -105,18 +121,30 @@
 
 #if DEBUGGING
 # define Debug(mask, message) \
-			if ( (DebugFlags & (mask) ) == (mask) ) \
+			if ( (DebugFlags & (mask) )  ) \
 				printf message;
 #else /* !DEBUGGING */
 # define Debug(mask, message) \
 			;
 #endif /* DEBUGGING */
 
+#define Stringify_(x)	#x
+#define Stringify(x)	Stringify_(x)
 #define	MkLower(ch)	(isupper(ch) ? tolower(ch) : ch)
 #define	MkUpper(ch)	(islower(ch) ? toupper(ch) : ch)
 #define	Set_LineNum(ln)	{Debug(DPARS|DEXT,("linenum=%d\n",ln)); \
 			 LineNumber = ln; \
 			}
+
+typedef int time_min;
+
+/* Log levels */
+#define	CRON_LOG_JOBSTART	0x01
+#define	CRON_LOG_JOBEND		0x02
+#define	CRON_LOG_JOBFAILED	0x04
+#define	CRON_LOG_JOBPID		0x08
+
+#define SECONDS_PER_MINUTE 60
 
 #define	FIRST_MINUTE	0
 #define	LAST_MINUTE	59
@@ -160,6 +188,8 @@ typedef	struct _entry {
 #define	DOM_STAR	0x01
 #define	DOW_STAR	0x02
 #define	WHEN_REBOOT	0x04
+#define	MIN_STAR	0x08
+#define	HR_STAR		0x10
 } entry;
 
 			/* the crontab database will be a list of the
@@ -174,13 +204,24 @@ typedef	struct _user {
 	char		*name;
 	time_t		mtime;		/* last modtime of crontab */
 	entry		*crontab;	/* this person's crontab */
+#ifdef WITH_SELINUX
+	security_context_t scontext;    /* SELinux security context */
+#endif
 } user;
 
 typedef	struct _cron_db {
 	user		*head, *tail;	/* links */
-	time_t		mtime;		/* last modtime on spooldir */
+	time_t		user_mtime;     /* last modtime on spooldir */
+	time_t		sys_mtime;      /* last modtime on system crontab */
+	time_t		sysd_mtime;     /* last modtime on system crondir */
 } cron_db;
 
+typedef struct _orphan {
+	struct _orphan  *next;          /* link */
+	char	*uname;
+	char	*fname;
+	char	*tabname;
+} orphan;
 
 void		set_cron_uid __P((void)),
 		set_cron_cwd __P((void)),
@@ -198,18 +239,22 @@ void		set_cron_uid __P((void)),
 		acquire_daemonlock __P((int)),
 		skip_comments __P((FILE *)),
 		log_it __P((char *, int, char *, char *)),
-		log_close __P((void));
+		log_close __P((void)),
+		check_orphans __P((cron_db *));
 
 int		job_runqueue __P((void)),
 		set_debug_flags __P((char *)),
 		get_char __P((FILE *)),
 		get_string __P((char *, int, FILE *, char *)),
 		swap_uids __P((void)),
+		swap_uids_back __P((void)),
 		load_env __P((char *, FILE *)),
 		cron_pclose __P((FILE *)),
 		strcmp_until __P((char *, char *, int)),
 		allowed __P((char *)),
 		strdtb __P((char *));
+
+long		get_gmtoff(time_t *, struct tm *);
 
 char		*env_get __P((char *, char **)),
 		*arpadate __P((time_t *)),
@@ -219,13 +264,13 @@ char		*env_get __P((char *, char **)),
 		**env_copy __P((char **)),
 		**env_set __P((char **, char *));
 
-user		*load_user __P((int, struct passwd *, char *)),
-		*find_user __P((cron_db *, char *));
+user		*load_user __P((int, struct passwd *, char *, char *, char *)),
+		*find_user __P((cron_db *, const char *));
 
 entry		*load_entry __P((FILE *, void (*)(),
 				 struct passwd *, char **));
 
-FILE		*cron_popen __P((char *, char *));
+FILE		*cron_popen __P((char *, char *, entry *));
 
 
 				/* in the C tradition, we only create
@@ -254,7 +299,18 @@ char	*DowNames[] = {
 
 char	*ProgramName;
 int	LineNumber;
-time_t	TargetTime;
+time_t	StartTime;
+time_min timeRunning;
+time_min virtualTime;
+time_min clockTime;
+static long GMToff;
+
+int	stay_foreground;
+int	lsbsysinit_mode;
+int	log_level;
+int	fqdn_in_subject;
+
+char	cron_default_mail_charset[MAX_ENVSTR] = "";
 
 # if DEBUGGING
 int	DebugFlags;
@@ -268,8 +324,15 @@ extern	char	*copyright[],
 		*MonthNames[],
 		*DowNames[],
 		*ProgramName;
+extern	int	lsbsysinit_mode;
+extern	int	log_level;
+extern	int	fqdn_in_subject;
 extern	int	LineNumber;
-extern	time_t	TargetTime;
+extern	time_t	StartTime;
+extern  time_min timeRunning;
+extern  time_min virtualTime;
+extern  time_min clockTime;
+extern	char	cron_default_mail_charset[MAX_ENVSTR];
 # if DEBUGGING
 extern	int	DebugFlags;
 extern	char	*DebugFlagNames[];
