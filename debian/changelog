@@ -1,3 +1,22 @@
+cron (3.0pl1-137+kaisen1) kaisen-packages; urgency=medium
+
+  * Import new upstream release
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Wed, 03 Mar 2021 02:35:28 +0200
+
+cron (3.0pl1-137) unstable; urgency=medium
+
+  [ Laurent Combe ]
+  * Add patch Add-MAILFROM-environment-variable.patch
+    (Closes: #898177, #1750051)
+
+  [ Christian Kastner ]
+  * Modify the above patch to use cronie's safe_p() function for email
+    validation
+  * Remove myself from Uploaders
+
+ -- Christian Kastner <ckk@debian.org>  Mon, 22 Feb 2021 23:43:24 +0100
+
 cron (3.0pl1-136+kaisen3) kaisen-packages; urgency=medium
 
   * Fix typo on debian/crontab.main
@@ -6,7 +25,7 @@ cron (3.0pl1-136+kaisen3) kaisen-packages; urgency=medium
 
 cron (3.0pl1-136+kaisen2) kaisen-packages; urgency=medium
 
-  * Update kaisen-basemenu-purge scheduled task 
+  * Update kaisen-basemenu-purge scheduled task
 
  -- Kevin Chevreuil - Kaisen <kaisen@kaisen-linux.org>  Sat, 12 Dec 2020 03:35:39 +0200
 

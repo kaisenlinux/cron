@@ -67,3 +67,4 @@ features/Recover-from-crontab-errors.patch
 features/Selective-logging.patch
 features/Check-orphaned-crontabs-for-adoption.patch
 features/Add-option-to-include-FQDN-in-email.patch
+features/Add-MAILFROM-environment-variable.patch
